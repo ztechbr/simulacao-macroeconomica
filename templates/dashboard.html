@@ -1,0 +1,186 @@
+{% macro slider(name, label, value, step, suffix='', decimals=1, signed=false, note='') -%}
+<label class="slider-field" for="{{ name }}">
+  <span class="slider-head">
+    <span>{{ label }}</span>
+    <output id="{{ name }}_value" for="{{ name }}" class="slider-value" data-decimals="{{ decimals }}" data-suffix="{{ suffix }}" data-signed="{{ 'true' if signed else 'false' }}">{{ value }}{{ suffix }}</output>
+  </span>
+  <input id="{{ name }}" name="{{ name }}" type="range" min="{{ policy_ranges[name][0] }}" max="{{ policy_ranges[name][1] }}" step="{{ step }}" value="{{ value }}" data-slider-output="{{ name }}_value"{% if note %} aria-describedby="{{ name }}_note"{% endif %}>
+  <span class="slider-scale"><span>{{ policy_ranges[name][0] }}</span><span>{{ policy_ranges[name][1] }}</span></span>
+  {% if note %}<em id="{{ name }}_note">{{ note }}</em>{% endif %}
+</label>
+{%- endmacro %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presidente do Brasil - Simulador Macroeconômico</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="eyebrow">SIMULAÇÃO DIDÁTICA</div>
+    <h1>Presidente do Brasil</h1>
+    <p>Macroeconomia aberta com governo, contas nacionais, política fiscal, monetária e setor externo.</p>
+  </div>
+  <form method="post" action="{{ url_for('reset_route') }}"><button class="secondary">Reiniciar cenário</button></form>
+</header>
+
+<main class="container">
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <section class="statusbar">
+    <strong>{{ state.period }}</strong><span>{{ state.status }}</span><span>Mandato: {{ state.quarter }}/16 trimestres</span>
+    {% if state.alerts %}<span class="warning">{{ state.alerts|join(' | ') }}</span>{% endif %}
+  </section>
+
+  <section class="cards">
+    <article><small>PIB trimestral</small><b>R$ {{ '%.1f'|format(state.gdp_nominal_q_brl_bn) }} bi</b><span>{{ '%+.2f'|format(state.gdp_real_growth_qoq_pct) }}% t/t</span></article>
+    <article><small>Inflação IPCA 12m</small><b>{{ '%.2f'|format(state.ipca_12m_pct) }}%</b><span>nível de preços {{ '%.1f'|format(state.price_level_index) }}</span></article>
+    <article><small>Desemprego</small><b>{{ '%.2f'|format(state.unemployment_pct) }}%</b><span>{{ '%.1f'|format(state.employed_m) }} mi ocupados</span></article>
+    <article><small>Selic</small><b>{{ '%.2f'|format(state.selic_pct_aa) }}%</b><span>a.a.</span></article>
+    <article><small>Câmbio</small><b>R$ {{ '%.4f'|format(state.fx_brl_usd) }}</b><span>por US$</span></article>
+    <article><small>DBGG</small><b>{{ '%.1f'|format(state.gross_debt_pct_gdp) }}%</b><span>do PIB</span></article>
+    <article><small>Conta corrente</small><b>{{ '%+.2f'|format(state.current_account_pct_gdp) }}%</b><span>do PIB</span></article>
+    <article><small>Aprovação</small><b>{{ '%.1f'|format(state.approval_pct) }}%</b><span>índice sintético</span></article>
+  </section>
+
+  <section class="layout">
+    <div class="panel">
+      <h2>Decisões para o próximo trimestre</h2>
+      <p class="muted">Política fiscal é tratada como decisão do governo. Selic, câmbio, crescimento mundial e risco são hipóteses de cenário. No Brasil, a Selic não é definida diretamente pela Presidência.</p>
+      <form method="post" action="{{ url_for('advance_route') }}" class="policy-grid">
+        {{ slider('government_consumption_growth_pct', 'Consumo do governo, variação %', 0, 0.5, '%', 1, true) }}
+        {{ slider('public_investment_delta_pct_gdp', 'Investimento público, delta p.p. PIB', 0, 0.1, ' p.p.', 1, true) }}
+        {{ slider('tax_burden_delta_pp', 'Carga tributária, delta p.p.', 0, 0.1, ' p.p.', 1, true) }}
+        {{ slider('transfers_growth_pct', 'Transferências, variação %', 0, 0.5, '%', 1, true) }}
+        {{ slider('minimum_wage_growth_pct', 'Salário mínimo, variação %', 0, 0.5, '%', 1, true) }}
+        {{ slider('selic_pct_aa', 'Selic do cenário, % a.a.', state.selic_pct_aa, 0.25, '% a.a.', 2, false) }}
+        {{ slider('fx_intervention_usd_bn', 'Intervenção cambial, US$ bi', 0, 0.5, ' US$ bi', 1, true, 'positivo = venda de reservas; negativo = compra de reservas') }}
+        {{ slider('productivity_quarterly_pct', 'Produtividade, % no trimestre', 0.10, 0.05, '%', 2, true) }}
+        {{ slider('confidence_delta', 'Confiança, delta índice', 0, 1, ' pts', 0, true) }}
+        {{ slider('world_growth_pct', 'Crescimento mundial, % a.a.', 2.8, 0.1, '% a.a.', 1, true) }}
+        {{ slider('commodity_shock_pct', 'Choque de commodities, %', 0, 1, '%', 0, true) }}
+        {{ slider('risk_premium_delta', 'Prêmio de risco, delta índice', 0, 1, ' pts', 0, true) }}
+        <label>Imigração líquida, mil pessoas<input name="immigration_thousand" type="number" step="10" value="0"></label>
+        <label class="check"><input name="random_shock" type="checkbox"> incluir choque estocástico pequeno</label>
+        <button class="primary" type="submit">Executar trimestre</button>
+      </form>
+    </div>
+
+    <div class="panel history-panel">
+      <h2>Histórico</h2>
+      <canvas id="historyChart" width="760" height="340"></canvas>
+      <div class="legend" aria-label="Legenda do gráfico">
+        <span class="legend-item"><i class="legend-swatch legend-gdp" aria-hidden="true"></i>PIB t/t</span>
+        <span class="legend-item"><i class="legend-swatch legend-ipca" aria-hidden="true"></i>IPCA 12m</span>
+        <span class="legend-item"><i class="legend-swatch legend-unemployment" aria-hidden="true"></i>Desemprego</span>
+        <span class="legend-item"><i class="legend-swatch legend-debt" aria-hidden="true"></i>Dívida/PIB</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel history-table-panel">
+    <h2>Histórico por período</h2>
+    <p class="history-note">A coluna Var. % compara cada indicador com o período imediatamente anterior. No PIB, aumento é favorável e aparece em verde. Em IPCA, desemprego e dívida/PIB, aumento é desfavorável e aparece em vermelho; redução aparece em verde. Estabilidade permanece em tom neutro.</p>
+    <div class="table-wrap history-table-wrap">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th rowspan="2">Período</th>
+            <th colspan="2">PIB t/t</th>
+            <th colspan="2">IPCA 12m</th>
+            <th colspan="2">Desemprego</th>
+            <th colspan="2">Dívida/PIB</th>
+          </tr>
+          <tr>
+            <th>Valor</th><th>Var. %</th>
+            <th>Valor</th><th>Var. %</th>
+            <th>Valor</th><th>Var. %</th>
+            <th>Valor</th><th>Var. %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in history_table %}
+          <tr>
+            <td><strong>{{ row.period }}</strong></td>
+            <td>{{ '%+.2f'|format(row.gdp_real_growth_qoq_pct) }}%</td>
+            <td class="{% if row.gdp_real_growth_qoq_pct_change_pct is not none %}{% if row.gdp_real_growth_qoq_pct_change_pct > 0 %}change-positive{% elif row.gdp_real_growth_qoq_pct_change_pct < 0 %}change-negative{% else %}change-neutral{% endif %}{% endif %}">
+              {% if row.gdp_real_growth_qoq_pct_change_pct is none %}--{% else %}{{ '%+.2f'|format(row.gdp_real_growth_qoq_pct_change_pct) }}%{% endif %}
+            </td>
+            <td>{{ '%.2f'|format(row.ipca_12m_pct) }}%</td>
+            <td class="{% if row.ipca_12m_pct_change_pct is not none %}{% if row.ipca_12m_pct_change_pct > 0 %}change-negative{% elif row.ipca_12m_pct_change_pct < 0 %}change-positive{% else %}change-neutral{% endif %}{% endif %}">
+              {% if row.ipca_12m_pct_change_pct is none %}--{% else %}{{ '%+.2f'|format(row.ipca_12m_pct_change_pct) }}%{% endif %}
+            </td>
+            <td>{{ '%.2f'|format(row.unemployment_pct) }}%</td>
+            <td class="{% if row.unemployment_pct_change_pct is not none %}{% if row.unemployment_pct_change_pct > 0 %}change-negative{% elif row.unemployment_pct_change_pct < 0 %}change-positive{% else %}change-neutral{% endif %}{% endif %}">
+              {% if row.unemployment_pct_change_pct is none %}--{% else %}{{ '%+.2f'|format(row.unemployment_pct_change_pct) }}%{% endif %}
+            </td>
+            <td>{{ '%.2f'|format(row.gross_debt_pct_gdp) }}%</td>
+            <td class="{% if row.gross_debt_pct_gdp_change_pct is not none %}{% if row.gross_debt_pct_gdp_change_pct > 0 %}change-negative{% elif row.gross_debt_pct_gdp_change_pct < 0 %}change-positive{% else %}change-neutral{% endif %}{% endif %}">
+              {% if row.gross_debt_pct_gdp_change_pct is none %}--{% else %}{{ '%+.2f'|format(row.gross_debt_pct_gdp_change_pct) }}%{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Contas nacionais e identidade macroeconômica</h2>
+    <div class="formula">Y = C + I + G + X - M + ΔEstoque</div>
+    <div class="table-wrap"><table><thead><tr><th>Variável</th><th>R$ bi</th><th>% PIB</th></tr></thead><tbody>
+      <tr><td>Consumo das famílias, C</td><td>{{ '%.1f'|format(state.consumption_brl_bn) }}</td><td>{{ '%.2f'|format(state.consumption_share_pct) }}</td></tr>
+      <tr><td>Investimento, I</td><td>{{ '%.1f'|format(state.investment_brl_bn) }}</td><td>{{ '%.2f'|format(state.investment_share_pct) }}</td></tr>
+      <tr><td>Consumo do governo, G</td><td>{{ '%.1f'|format(state.government_consumption_brl_bn) }}</td><td>{{ '%.2f'|format(state.government_consumption_share_pct) }}</td></tr>
+      <tr><td>Exportações, X</td><td>{{ '%.1f'|format(state.exports_brl_bn) }}</td><td>{{ '%.2f'|format(state.exports_share_pct) }}</td></tr>
+      <tr><td>Importações, M</td><td>{{ '%.1f'|format(state.imports_brl_bn) }}</td><td>{{ '%.2f'|format(state.imports_share_pct) }}</td></tr>
+      <tr><td>Exportações líquidas, X-M</td><td>{{ '%.1f'|format(state.net_exports_brl_bn) }}</td><td>{{ '%.2f'|format(state.exports_share_pct-state.imports_share_pct) }}</td></tr>
+      <tr><td>Variação de estoques</td><td>{{ '%.1f'|format(state.inventory_change_brl_bn) }}</td><td>{{ '%.2f'|format(state.inventory_share_pct) }}</td></tr>
+      <tr><td><strong>Demanda agregada</strong></td><td><strong>{{ '%.1f'|format(state.aggregate_expenditure_brl_bn) }}</strong></td><td>100,00</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section class="three">
+    <div class="panel"><h2>Renda, poupança e produto</h2><dl>
+      <dt>Renda agregada</dt><dd>R$ {{ '%.1f'|format(state.aggregate_income_brl_bn) }} bi</dd>
+      <dt>Poupança bruta</dt><dd>{{ '%.2f'|format(state.gross_savings_share_pct) }}% PIB</dd>
+      <dt>Poupança</dt><dd>R$ {{ '%.1f'|format(state.savings_brl_bn) }} bi</dd>
+      <dt>Depreciação</dt><dd>R$ {{ '%.1f'|format(state.depreciation_brl_bn) }} bi</dd>
+      <dt>Produto interno líquido</dt><dd>R$ {{ '%.1f'|format(state.net_domestic_product_brl_bn) }} bi</dd>
+      <dt>Produto nacional bruto</dt><dd>R$ {{ '%.1f'|format(state.gnp_brl_bn) }} bi</dd>
+      <dt>PIB a custo de fatores</dt><dd>R$ {{ '%.1f'|format(state.gdp_at_factor_cost_brl_bn) }} bi</dd>
+    </dl></div>
+
+    <div class="panel"><h2>Fiscal e monetário</h2><dl>
+      <dt>Carga tributária</dt><dd>{{ '%.2f'|format(state.tax_burden_pct_gdp) }}% PIB</dd>
+      <dt>Resultado primário</dt><dd>{{ '%+.2f'|format(state.primary_balance_pct_gdp) }}% PIB</dd>
+      <dt>Juros nominais</dt><dd>{{ '%.2f'|format(state.nominal_interest_pct_gdp) }}% PIB</dd>
+      <dt>Resultado nominal</dt><dd>{{ '%+.2f'|format(state.nominal_balance_pct_gdp) }}% PIB</dd>
+      <dt>Dívida bruta</dt><dd>{{ '%.2f'|format(state.gross_debt_pct_gdp) }}% PIB</dd>
+      <dt>Dívida líquida</dt><dd>{{ '%.2f'|format(state.net_debt_pct_gdp) }}% PIB</dd>
+      <dt>Espaço fiscal</dt><dd>{{ '%.1f'|format(state.fiscal_space_index) }}/100</dd>
+    </dl></div>
+
+    <div class="panel"><h2>Setor externo e trabalho</h2><dl>
+      <dt>Reservas</dt><dd>US$ {{ '%.1f'|format(state.reserves_usd_bn) }} bi</dd>
+      <dt>Conta corrente</dt><dd>{{ '%+.2f'|format(state.current_account_pct_gdp) }}% PIB</dd>
+      <dt>IDP</dt><dd>{{ '%.2f'|format(state.fdi_pct_gdp) }}% PIB</dd>
+      <dt>População</dt><dd>{{ '%.3f'|format(state.population_m) }} mi</dd>
+      <dt>Renda média real</dt><dd>R$ {{ '%.0f'|format(state.avg_real_income_brl) }}</dd>
+      <dt>Salário mínimo</dt><dd>R$ {{ '%.0f'|format(state.minimum_wage_brl) }}</dd>
+      <dt>Vulnerabilidade externa</dt><dd>{{ '%.1f'|format(state.external_vulnerability_index) }}/100</dd>
+    </dl></div>
+  </section>
+
+  <section class="panel">
+    <h2>Hipóteses do modelo</h2>
+    <p>Este é um simulador educacional, não um modelo de previsão oficial. As identidades contábeis seguem a estrutura de Contas Nacionais. As relações causais entre juros, inflação, câmbio, emprego, investimento, confiança, dívida e crescimento são funções simplificadas e parametrizadas no código. Portanto, os efeitos de cada decisão são hipóteses a serem testadas, não previsões.</p>
+  </section>
+
+  <section class="panel sources"><h2>Fontes e vintage do baseline</h2><ul>{% for src in sources %}<li><a href="{{ src.url }}" target="_blank" rel="noreferrer">{{ src.name }}</a><span>{{ src.note }}</span></li>{% endfor %}</ul></section>
+</main>
+<script>window.SIM_HISTORY = {{ state.history|tojson }};</script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body></html>
